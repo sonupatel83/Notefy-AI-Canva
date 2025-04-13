@@ -41,7 +41,7 @@ def analyze_image():
             print("Error: No Gemini API key provided")
             return jsonify({'error': 'Gemini API key is required'}), 400
         
-        print(f"Using API key: {api_key[:5]}...{api_key[-5:]}")
+        # print(f"Using API key: {api_key[:5]}...{api_key[-5:]}")
         
         # Configure the Gemini API
         genai.configure(api_key=api_key)

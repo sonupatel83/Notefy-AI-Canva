@@ -4,18 +4,18 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Eraser, Pencil, Search, Download, Trash2, X } from "lucide-react"
+import { Eraser, Pencil, Search, Download, Trash2, X, ChevronDown } from "lucide-react"
 import { SketchPicker } from "react-color"
 import AIResponseDisplay from "@/components/ai-response-display"
 import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 export default function CanvasPage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [ctx, setCtx] = useState<CanvasRenderingContext2D | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [color, setColor] = useState("#000000")
-  const [bgColor, setBgColor] = useState("#ffffff")
+  const [backgroundColor, setBackgroundColor] = useState("#ffffff")
   const [lineWidth, setLineWidth] = useState(2)
   const [tool, setTool] = useState<"pen" | "eraser" | "selection">("pen")
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null)
@@ -27,8 +27,37 @@ export default function CanvasPage() {
   const [showBgColorPicker, setShowBgColorPicker] = useState(false)
   const [showAiResponse, setShowAiResponse] = useState(false)
   const [canvasHeight, setCanvasHeight] = useState(600)
+  const [showPenOptions, setShowPenOptions] = useState(false)
+  const [showEraserOptions, setShowEraserOptions] = useState(false)
+  const [eraserMode, setEraserMode] = useState<"stroke" | "point">("stroke")
 
-  // Initialize canvas
+  const writingColors = [
+    { name: "Black", value: "#000000" },
+    { name: "Dark Blue", value: "#000080" },
+    { name: "Dark Green", value: "#006400" },
+    { name: "Dark Red", value: "#8B0000" },
+    { name: "White", value: "#FFFFFF" }
+  ]
+
+  const getContrastingColor = (bgColor: string) => {
+    const r = parseInt(bgColor.slice(1, 3), 16)
+    const g = parseInt(bgColor.slice(3, 5), 16)
+    const b = parseInt(bgColor.slice(5, 7), 16)
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return brightness > 128 ? "#000000" : "#FFFFFF"
+  }
+
+  const handleBackgroundColorChange = (newColor: string) => {
+    if (!ctx || !canvasRef.current) return
+    const imageData = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height)
+    setBackgroundColor(newColor)
+    ctx.fillStyle = newColor
+    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    ctx.putImageData(imageData, 0, 0)
+    const contrastingColor = getContrastingColor(newColor)
+    setColor(contrastingColor)
+  }
+
   useEffect(() => {
     if (canvasRef.current) {
       const canvas = canvasRef.current
@@ -40,23 +69,20 @@ export default function CanvasPage() {
         context.lineJoin = "round"
         context.strokeStyle = color
         context.lineWidth = lineWidth
-        setCtx(context)
-
-        // Fill canvas with background color
-        context.fillStyle = bgColor
+        context.fillStyle = backgroundColor
         context.fillRect(0, 0, canvas.width, canvas.height)
+        setCtx(context)
       }
     }
-  }, [bgColor, canvasHeight])
+  }, [canvasHeight, backgroundColor])
 
   useEffect(() => {
     if (ctx) {
-      ctx.strokeStyle = tool === "pen" ? color : bgColor
+      ctx.strokeStyle = tool === "pen" ? color : backgroundColor
       ctx.lineWidth = lineWidth
     }
-  }, [color, lineWidth, tool, ctx, bgColor])
+  }, [color, lineWidth, tool, ctx, backgroundColor])
 
-  // Set AI response visibility when response changes
   useEffect(() => {
     if (aiResponse) {
       setShowAiResponse(true)
@@ -65,12 +91,13 @@ export default function CanvasPage() {
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!ctx) return
-
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top + window.scrollY
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const x = (e.clientX - rect.left) * scaleX
+    const y = (e.clientY - rect.top) * scaleY
 
     if (tool === "selection") {
       setIsSelecting(true)
@@ -86,12 +113,13 @@ export default function CanvasPage() {
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!ctx) return
-
-    const rect = canvasRef.current?.getBoundingClientRect()
-    if (!rect) return
-
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top + window.scrollY
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const x = (e.clientX - rect.left) * scaleX
+    const y = (e.clientY - rect.top) * scaleY
 
     if (tool === "selection" && isSelecting) {
       setSelectionEnd({ x, y })
@@ -100,25 +128,30 @@ export default function CanvasPage() {
 
     if (!isDrawing) return
 
-    ctx.lineTo(x, y)
-    ctx.stroke()
+    if (tool === "eraser" && eraserMode === "point") {
+      ctx.beginPath()
+      ctx.arc(x, y, lineWidth / 2, 0, Math.PI * 2)
+      ctx.fillStyle = backgroundColor
+      ctx.fill()
+    } else {
+      ctx.lineTo(x, y)
+      ctx.stroke()
+    }
   }
 
   const stopDrawing = () => {
     if (!ctx) return
-
     if (tool === "selection" && isSelecting) {
       setIsSelecting(false)
       return
     }
-
     ctx.closePath()
     setIsDrawing(false)
   }
 
   const clearCanvas = () => {
     if (!ctx || !canvasRef.current) return
-    ctx.fillStyle = bgColor
+    ctx.fillStyle = backgroundColor
     ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height)
     setSelectionStart(null)
     setSelectionEnd(null)
@@ -136,38 +169,29 @@ export default function CanvasPage() {
 
   const searchWithGemini = async () => {
     if (!selectionStart || !selectionEnd || !canvasRef.current) return
-
     setIsLoading(true)
     setAiResponse(null)
+    setTool("pen")
 
     try {
-      // Get the selection area
       const x = Math.min(selectionStart.x, selectionEnd.x)
       const y = Math.min(selectionStart.y, selectionEnd.y)
       const width = Math.abs(selectionEnd.x - selectionStart.x)
       const height = Math.abs(selectionEnd.y - selectionStart.y)
 
-      // Ensure we have a valid selection
       if (width < 10 || height < 10) {
         throw new Error("Selection area is too small. Please select a larger area.")
       }
 
-      // Create a temporary canvas to hold the selection
       const tempCanvas = document.createElement("canvas")
       tempCanvas.width = width
       tempCanvas.height = height
       const tempCtx = tempCanvas.getContext("2d")
 
       if (tempCtx && ctx) {
-        // Draw the selection to the temporary canvas
         tempCtx.drawImage(canvasRef.current, x, y, width, height, 0, 0, width, height)
-
-        // Convert to base64
         const imageData = tempCanvas.toDataURL("image/png")
 
-        console.log("Sending image to API...")
-
-        // Send to backend
         const response = await fetch("/api/gemini", {
           method: "POST",
           headers: {
@@ -206,12 +230,15 @@ export default function CanvasPage() {
   }
 
   const renderSelectionBox = () => {
-    if (!selectionStart || !selectionEnd) return null
-
-    const left = Math.min(selectionStart.x, selectionEnd.x)
-    const top = Math.min(selectionStart.y, selectionEnd.y)
-    const width = Math.abs(selectionEnd.x - selectionStart.x)
-    const height = Math.abs(selectionEnd.y - selectionStart.y)
+    if (!selectionStart || !selectionEnd || !canvasRef.current) return null
+    const canvas = canvasRef.current
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = rect.width / canvas.width
+    const scaleY = rect.height / canvas.height
+    const left = Math.min(selectionStart.x, selectionEnd.x) * scaleX
+    const top = Math.min(selectionStart.y, selectionEnd.y) * scaleY
+    const width = Math.abs(selectionEnd.x - selectionStart.x) * scaleX
+    const height = Math.abs(selectionEnd.y - selectionStart.y) * scaleY
 
     return (
       <div
@@ -234,99 +261,146 @@ export default function CanvasPage() {
         <div className={cn("flex-1 flex flex-col transition-all duration-300", showAiResponse ? "lg:w-2/3" : "w-full")}>
           <div className="bg-white rounded-lg shadow-md p-4 mb-4">
             <div className="flex flex-wrap gap-2 mb-4">
-              <Tabs defaultValue="pen" className="w-full">
-                <TabsList className="mb-4">
-                  <TabsTrigger
-                    value="pen"
+              {/* Pen Tool */}
+              <Popover open={showPenOptions} onOpenChange={setShowPenOptions}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={tool === "pen" ? "default" : "outline"}
+                    size="sm"
                     onClick={() => setTool("pen")}
-                    className={tool === "pen" ? "bg-blue-100" : ""}
                   >
                     <Pencil className="h-4 w-4 mr-2" />
                     Pen
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="eraser"
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <span className="text-sm font-medium">Pen Color:</span>
+                      <div className="grid grid-cols-5 gap-2">
+                        {writingColors.map((colorOption) => (
+                          <button
+                            key={colorOption.value}
+                            className={`w-8 h-8 rounded-full border-2 ${
+                              color === colorOption.value ? "border-blue-500" : "border-gray-300"
+                            }`}
+                            style={{ backgroundColor: colorOption.value }}
+                            onClick={() => {
+                              setColor(colorOption.value)
+                              setShowColorPicker(false)
+                            }}
+                            title={colorOption.name}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Line Width: {lineWidth}px</span>
+                      <Slider
+                        value={[lineWidth]}
+                        min={1}
+                        max={20}
+                        step={1}
+                        onValueChange={(value) => setLineWidth(value[0])}
+                        className="w-48"
+                      />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Eraser Tool */}
+              <Popover open={showEraserOptions} onOpenChange={setShowEraserOptions}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={tool === "eraser" ? "default" : "outline"}
+                    size="sm"
                     onClick={() => setTool("eraser")}
-                    className={tool === "eraser" ? "bg-blue-100" : ""}
                   >
                     <Eraser className="h-4 w-4 mr-2" />
                     Eraser
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="selection"
-                    onClick={() => setTool("selection")}
-                    className={tool === "selection" ? "bg-blue-100" : ""}
-                  >
-                    <Search className="h-4 w-4 mr-2" />
-                    Selection
-                  </TabsTrigger>
-                </TabsList>
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Eraser Mode:</span>
+                      <Button
+                        variant={eraserMode === "stroke" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setEraserMode("stroke")}
+                      >
+                        Stroke
+                      </Button>
+                      <Button
+                        variant={eraserMode === "point" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setEraserMode("point")}
+                      >
+                        Point
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Size: {lineWidth}px</span>
+                      <Slider
+                        value={[lineWidth]}
+                        min={1}
+                        max={50}
+                        step={1}
+                        onValueChange={(value) => setLineWidth(value[0])}
+                        className="w-48"
+                      />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
 
-                <TabsContent value="pen" className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Pen Color:</span>
-                    <div
-                      className="w-8 h-8 rounded-full border border-gray-300 cursor-pointer"
-                      style={{ backgroundColor: color }}
-                      onClick={() => setShowColorPicker(!showColorPicker)}
-                    />
-                    {showColorPicker && (
-                      <div className="absolute z-10 mt-2">
-                        <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
-                        <SketchPicker color={color} onChange={(color) => setColor(color.hex)} />
+              {/* Background Color */}
+              <Popover open={showBgColorPicker} onOpenChange={setShowBgColorPicker}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <span className="text-sm font-medium">Background</span>
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <span className="text-sm font-medium">Background Color:</span>
+                      <div className="grid grid-cols-5 gap-2">
+                        {writingColors.map((colorOption) => (
+                          <button
+                            key={colorOption.value}
+                            className={`w-8 h-8 rounded-full border-2 ${
+                              backgroundColor === colorOption.value ? "border-blue-500" : "border-gray-300"
+                            }`}
+                            style={{ backgroundColor: colorOption.value }}
+                            onClick={() => {
+                              handleBackgroundColorChange(colorOption.value)
+                              setShowBgColorPicker(false)
+                            }}
+                            title={colorOption.name}
+                          />
+                        ))}
                       </div>
-                    )}
+                    </div>
                   </div>
+                </PopoverContent>
+              </Popover>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Line Width: {lineWidth}px</span>
-                    <Slider
-                      value={[lineWidth]}
-                      min={1}
-                      max={20}
-                      step={1}
-                      onValueChange={(value) => setLineWidth(value[0])}
-                      className="w-48"
-                    />
-                  </div>
-                </TabsContent>
+              {/* Selection Tool */}
+              <Button
+                variant={tool === "selection" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setTool("selection")}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Selection
+              </Button>
 
-                <TabsContent value="eraser" className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Eraser Size: {lineWidth}px</span>
-                    <Slider
-                      value={[lineWidth]}
-                      min={1}
-                      max={50}
-                      step={1}
-                      onValueChange={(value) => setLineWidth(value[0])}
-                      className="w-48"
-                    />
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="selection">
-                  <p className="text-sm text-gray-600">
-                    Click and drag to select an area of your notes, then use the search button to get AI insights.
-                  </p>
-                </TabsContent>
-              </Tabs>
-
-              <div className="flex items-center gap-2 mt-4">
-                <span className="text-sm font-medium">Background:</span>
-                <div
-                  className="w-8 h-8 rounded-full border border-gray-300 cursor-pointer"
-                  style={{ backgroundColor: bgColor }}
-                  onClick={() => setShowBgColorPicker(!showBgColorPicker)}
-                />
-                {showBgColorPicker && (
-                  <div className="absolute z-10 mt-2">
-                    <div className="fixed inset-0" onClick={() => setShowBgColorPicker(false)} />
-                    <SketchPicker color={bgColor} onChange={(color) => setBgColor(color.hex)} />
-                  </div>
-                )}
-              </div>
-
+              {/* Action Buttons */}
               <div className="flex gap-2 ml-auto">
                 <Button variant="outline" size="sm" onClick={downloadCanvas}>
                   <Download className="h-4 w-4 mr-2" />
@@ -355,7 +429,7 @@ export default function CanvasPage() {
           <div className="relative bg-white rounded-lg shadow-md overflow-hidden mb-4">
             <canvas
               ref={canvasRef}
-              className="w-full border border-gray-200 rounded-lg"
+              className="w-full border border-gray-200 rounded-lg touch-none"
               style={{ height: `${canvasHeight}px` }}
               onMouseDown={startDrawing}
               onMouseMove={draw}
