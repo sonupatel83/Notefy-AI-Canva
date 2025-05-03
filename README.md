@@ -3,7 +3,7 @@
 You can try out Notefy at: [https://notefycanvas.vercel.app](https://notefycanvas.vercel.app)
 
 
-Notefy is a modern web application that combines a digital canvas with AI-powered analysis capabilities. It allows users to create, store, and analyze handwritten notes with the help of Google's Gemini AI.
+Notefy is a modern web application that combines a digital canvas with AI-powered analysis capabilities. It allows users to create, store, and analyze handwritten notes with the help of AI.
 
 ## Features
 
