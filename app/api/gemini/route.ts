@@ -1,4 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { GoogleGenerativeAI } from "@google/generative-ai"
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,35 +15,46 @@ export async function POST(request: NextRequest) {
     // Remove the data URL prefix to get just the base64 data
     const base64Image = image.split(",")[1]
 
-    const flaskApiUrl = process.env.FLASK_API_URL || "http://127.0.0.1:5000"
-    console.log(`Calling Flask API at: ${flaskApiUrl}/analyze`)
+    // Create the model
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" })
 
-    // Call the Flask backend
-    const flaskResponse = await fetch(`${flaskApiUrl}/analyze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        image: base64Image,
-        api_key: process.env.GEMINI_API_KEY,
-      }),
-      cache: "no-store",
-    })
+    // Generate content
+    const result = await model.generateContent([
+      "Analyze this handwritten content and provide a detailed explanation. Consider the following aspects:\n\n" +
+      "1. If it's a mathematical expression or equation:\n" +
+      "   - Explain the mathematical concepts involved\n" +
+      "   - Break down the steps if it's a calculation\n" +
+      "   - Provide the solution if applicable\n" +
+      "   - Explain any formulas or theorems used\n\n" +
+      "2. If it's a chemical formula or equation:\n" +
+      "   - Identify the elements and compounds\n" +
+      "   - Explain the chemical reaction if present\n" +
+      "   - Describe the properties and significance\n" +
+      "   - Explain any chemical principles involved\n\n" +
+      "3. If it's a physics formula or concept:\n" +
+      "   - Explain the physical principles\n" +
+      "   - Describe the variables and their meanings\n" +
+      "   - Explain the applications and significance\n" +
+      "   - Provide relevant examples\n\n" +
+      "4. If it's a general note or text:\n" +
+      "   - Summarize the main points\n" +
+      "   - Explain key concepts\n" +
+      "   - Provide context and significance\n" +
+      "   - Suggest related topics or further reading\n\n" +
+      "Provide a clear, detailed explanation that would help someone understand the content thoroughly.",
+      {
+        inlineData: {
+          data: base64Image,
+          mimeType: "image/png"
+        }
+      }
+    ])
 
-    if (!flaskResponse.ok) {
-      const errorText = await flaskResponse.text()
-      console.error("Flask API error:", errorText)
-      return NextResponse.json(
-        { error: `Failed to process image with Gemini API: ${errorText}` },
-        { status: flaskResponse.status },
-      )
-    }
-
-    const data = await flaskResponse.json()
+    const response = await result.response
+    const text = response.text()
 
     return NextResponse.json({
-      response: data.response,
+      response: text,
     })
   } catch (error) {
     console.error("Error processing request:", error)
@@ -50,4 +64,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

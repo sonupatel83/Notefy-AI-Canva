@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Y2FyZWZ1bC1oYW1zdGVyLTkxLmNsZXJrLmFjY291bnRzLmRldiQ",
+    "CLERK_SECRET_KEY": "sk_test_80JWcK0FPQUdtTOuuev7DCotTUouSTRfxW6jeub4Gr",
+    "GEMINI_API_KEY": "AIzaSyAoxDvJuRkWt2V76w3mn1uiXQsXdd-6eVs",
+    "MONGODB_URI": "mongodb+srv://ckp5229:gl7LKKiVpyE22eRX@ninjaproject.5x6td.mongodb.net/",
+    "MONGODB_DB": "notefy"
+  }
+} 

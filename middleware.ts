@@ -1,22 +1,34 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { withClerkMiddleware, getAuth } from "@clerk/nextjs/server"
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
 
-// Create a matcher for public routes (only authentication pages)
-const isPublicRoute = createRouteMatcher([
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-]);
+const publicPaths = ["/", "/api/webhook", "/sign-in", "/sign-up"]
 
-export default clerkMiddleware((auth, req) => {
-  if (!isPublicRoute(req)) {
-    auth.protect();
+const isPublic = (path: string) => {
+  return publicPaths.find((x) => path.startsWith(x))
+}
+
+export default withClerkMiddleware((request: NextRequest) => {
+  // Handle logout redirection
+  if (request.nextUrl.pathname === "/sign-out") {
+    const landingUrl = new URL('/', request.url)
+    return NextResponse.redirect(landingUrl)
   }
-});
+
+  if (isPublic(request.nextUrl.pathname)) {
+    return NextResponse.next()
+  }
+
+  const { userId } = getAuth(request)
+  if (!userId) {
+    const signInUrl = new URL('/sign-in', request.url)
+    signInUrl.searchParams.set('redirect_url', request.url)
+    return NextResponse.redirect(signInUrl)
+  }
+
+  return NextResponse.next()
+})
 
 export const config = {
-  matcher: [
-    '/((?!.*\\..*|_next).*)',
-    '/',
-    '/(api|trpc)(.*)',
-    '/canvas(.*)',
-  ],
-}; 
+  matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
+}

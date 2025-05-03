@@ -1,0 +1,9 @@
+// These are additions you need to add to your package.json:
+// - @clerk/nextjs": "^5.0.0-beta
+// - @tailwindcss/typography": "^0.5.10"
+// - date-fns": "^3.3.1"
+// - jspdf": "^2.5.1"
+// - mongoose": "^8.2.0"
+// - next-themes": "^0.2.1"
+// - react-color": "^2.19.3"
+// - react-markdown": "^9.0.1"
