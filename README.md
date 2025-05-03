@@ -8,7 +8,7 @@ Notefy is a modern web application that combines a digital canvas with AI-powere
 ## Features
 
 - **Digital Canvas**: Draw, write, and erase on a responsive digital canvas
-- **AI-Powered Analysis**: Get detailed explanations of handwritten content using Gemini AI
+- **AI-Powered Analysis**: Get detailed explanations of handwritten content.
 - **Multi-Slide Support**: Create and manage multiple slides within a single note
 - **Cloud Storage**: Securely store and access your notes from any device
 - **User Authentication**: Secure sign-in and sign-up functionality
