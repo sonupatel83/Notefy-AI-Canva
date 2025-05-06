@@ -56,7 +56,6 @@ export default function NoteCard({ note, onDelete }: NoteCardProps) {
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.preventDefault() // Prevent navigation
-    setIsDownloading(true)
     try {
       const pdf = new jsPDF({
         orientation: "landscape",
@@ -82,8 +81,6 @@ export default function NoteCard({ note, onDelete }: NoteCardProps) {
         description: "Failed to download note. Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setIsDownloading(false)
     }
   }
 

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Input } from "@/components/ui/input"
-import { Eraser, Pencil, Search, Download, Trash2, X, ChevronDown, Save, CornerDownLeft, ChevronLeft, ChevronRight, Plus, Type } from "lucide-react"
+import { Eraser, Pencil, Search, Download, Trash2, X, ChevronDown, Save, CornerDownLeft, ChevronLeft, ChevronRight, Plus, Type, AlignLeft, AlignCenter, AlignRight, Bold, Italic, Underline, Square, Circle, Minus, Triangle } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { jsPDF } from "jspdf"
 import AIResponseDisplay from "@/components/ai-response-display"
@@ -21,6 +21,50 @@ interface CanvasEditorProps {
   userId: string
 }
 
+interface TextElement {
+  id: string
+  text: string
+  x: number
+  y: number
+  fontSize: number
+  color: string
+  fontFamily: string
+}
+
+type ShapeType = "rectangle" | "circle" | "line" | "triangle" | "none"
+
+interface Shape {
+  id: string
+  type: ShapeType
+  x: number
+  y: number
+  width: number
+  height: number
+  color: string
+  lineWidth: number
+}
+
+interface Slide {
+  canvasData: string
+  order: number
+  text?: string
+  textElements?: TextElement[]
+}
+
+interface CanvasImage {
+  id: string
+  src: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  isDragging: boolean
+  isResizing: boolean
+  dragOffset: { x: number; y: number }
+}
+
 export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEditorProps) {
   const router = useRouter()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -29,7 +73,7 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
   const [color, setColor] = useState("#000000")
   const [penWidth, setPenWidth] = useState(2)
   const [eraserWidth, setEraserWidth] = useState(10)
-  const [tool, setTool] = useState<"pen" | "eraser" | "selection" | "text">("pen")
+  const [tool, setTool] = useState<"pen" | "eraser" | "selection" | "text" | "shape">("pen")
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null)
   const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null)
   const [isSelecting, setIsSelecting] = useState(false)
@@ -51,7 +95,29 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
   const [canvasHistory, setCanvasHistory] = useState<ImageData[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [currentSlide, setCurrentSlide] = useState(0)
-  const [slides, setSlides] = useState<{ canvasData: string; order: number }[]>([])
+  const [slides, setSlides] = useState<Slide[]>([])
+  const [searchResults, setSearchResults] = useState<{ slideIndex: number; text: string }[]>([])
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1)
+  const [textElements, setTextElements] = useState<TextElement[]>([])
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null)
+  const [fontFamily, setFontFamily] = useState('Arial')
+  const [isDragging, setIsDragging] = useState(false)
+  const [draggedElementId, setDraggedElementId] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const [isTextToolActive, setIsTextToolActive] = useState(false)
+  const [shapeType, setShapeType] = useState<ShapeType>("none")
+  const [shapes, setShapes] = useState<Shape[]>([])
+  const [isDrawingShape, setIsDrawingShape] = useState(false)
+  const [shapeStart, setShapeStart] = useState<{ x: number; y: number } | null>(null)
+  const [showShapeOptions, setShowShapeOptions] = useState(false)
+  const [lastMousePos, setLastMousePos] = useState<{ x: number; y: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [images, setImages] = useState<CanvasImage[]>([])
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [isDraggingImage, setIsDraggingImage] = useState(false)
+  const [isResizingImage, setIsResizingImage] = useState(false)
+  const [resizeStart, setResizeStart] = useState<{ x: number; y: number } | null>(null)
+  const [showImageOptions, setShowImageOptions] = useState(false)
 
   const writingColors = [
     { name: "Black", value: "#000000" },
@@ -181,6 +247,18 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
     const x = (e.clientX - rect.left) * scaleX
     const y = (e.clientY - rect.top) * scaleY
 
+    if (tool === "shape" && shapeType !== "none") {
+      // Save the current canvas state before starting to draw
+      const currentState = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      setCanvasHistory(prev => [...prev, currentState])
+      setHistoryIndex(prev => prev + 1)
+
+      setIsDrawingShape(true)
+      setShapeStart({ x, y })
+      setLastMousePos({ x, y })
+      return
+    }
+
     if (tool === "selection") {
       setIsSelecting(true)
       setSelectionStart({ x, y })
@@ -189,8 +267,42 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
     }
 
     if (tool === "text") {
-      setTextPosition({ x, y })
-      setIsAddingText(true)
+      // Check if clicking on existing text
+      const clickedText = textElements.find(element => {
+        const metrics = ctx.measureText(element.text)
+        const textWidth = metrics.width
+        const textHeight = element.fontSize
+        const textX = element.x
+        return x >= textX && x <= textX + textWidth &&
+               y >= element.y - textHeight && y <= element.y
+      })
+
+      if (clickedText) {
+        if (e.ctrlKey || e.metaKey) {
+          // Start dragging
+          setIsDragging(true)
+          setDraggedElementId(clickedText.id)
+          setDragOffset({
+            x: x - clickedText.x,
+            y: y - clickedText.y
+          })
+        } else {
+          // Edit text
+          setSelectedTextId(clickedText.id)
+          setTextInput(clickedText.text)
+          setTextPosition({ x: clickedText.x, y: clickedText.y })
+          setFontSize(clickedText.fontSize)
+          setColor(clickedText.color)
+          setFontFamily(clickedText.fontFamily)
+          setIsAddingText(true)
+        }
+      } else {
+        // Add new text
+        setTextPosition({ x, y })
+        setIsAddingText(true)
+        setSelectedTextId(null)
+        setTextInput("")
+      }
       return
     }
 
@@ -200,14 +312,78 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
   }
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!ctx) return
+    if (!ctx || !canvasRef.current) return
     const canvas = canvasRef.current
-    if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     const scaleX = canvas.width / rect.width
     const scaleY = canvas.height / rect.height
     const x = (e.clientX - rect.left) * scaleX
     const y = (e.clientY - rect.top) * scaleY
+    setLastMousePos({ x, y })
+
+    if (isDrawingShape && shapeStart) {
+      // Restore the canvas state before drawing the shape
+      if (canvasHistory.length > 0) {
+        ctx.putImageData(canvasHistory[canvasHistory.length - 1], 0, 0)
+      }
+
+      // Draw current shape
+      const width = x - shapeStart.x
+      const height = y - shapeStart.y
+
+      ctx.strokeStyle = color
+      ctx.lineWidth = penWidth
+
+      switch (shapeType) {
+        case "rectangle":
+          ctx.strokeRect(shapeStart.x, shapeStart.y, width, height)
+          break
+        case "circle":
+          const radius = Math.sqrt(width * width + height * height)
+          ctx.beginPath()
+          ctx.arc(shapeStart.x, shapeStart.y, radius, 0, Math.PI * 2)
+          ctx.stroke()
+          break
+        case "line":
+          ctx.beginPath()
+          ctx.moveTo(shapeStart.x, shapeStart.y)
+          ctx.lineTo(x, y)
+          ctx.stroke()
+          break
+        case "triangle":
+          ctx.beginPath()
+          ctx.moveTo(shapeStart.x, y)
+          ctx.lineTo(x, y)
+          ctx.lineTo(shapeStart.x + width / 2, shapeStart.y)
+          ctx.closePath()
+          ctx.stroke()
+          break
+      }
+      return
+    }
+
+    if (isDragging && draggedElementId) {
+      // Update dragged text position
+      setTextElements(prevElements => 
+        prevElements.map(element => 
+          element.id === draggedElementId
+            ? { ...element, x: x - dragOffset.x, y: y - dragOffset.y }
+            : element
+        )
+      )
+
+      // Redraw canvas
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      textElements.forEach(element => {
+        if (element.id === draggedElementId) {
+          drawTextElement({ ...element, x: x - dragOffset.x, y: y - dragOffset.y })
+        } else {
+          drawTextElement(element)
+        }
+      })
+      return
+    }
 
     if (tool === "selection" && isSelecting) {
       setSelectionEnd({ x, y })
@@ -228,7 +404,42 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
   }
 
   const stopDrawing = () => {
-    if (!ctx) return
+    if (!ctx || !canvasRef.current || !lastMousePos) return
+
+    if (isDrawingShape && shapeStart) {
+      // Create the final shape
+      const newShape: Shape = {
+        id: Date.now().toString(),
+        type: shapeType,
+        x: shapeStart.x,
+        y: shapeStart.y,
+        width: lastMousePos.x - shapeStart.x,
+        height: lastMousePos.y - shapeStart.y,
+        color,
+        lineWidth: penWidth
+      }
+
+      // Add the shape to the list
+      setShapes(prev => [...prev, newShape])
+
+      // Draw the final shape
+      drawShape(newShape)
+
+      // Reset shape drawing state
+      setIsDrawingShape(false)
+      setShapeStart(null)
+
+      // Save the new state
+      saveCurrentState()
+      return
+    }
+
+    if (isDragging) {
+      setIsDragging(false)
+      setDraggedElementId(null)
+      saveCurrentState()
+      return
+    }
 
     if (tool === "selection" && isSelecting) {
       setIsSelecting(false)
@@ -237,17 +448,15 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
 
     ctx.closePath()
     setIsDrawing(false)
-
-    // Save state after drawing is complete
     saveCurrentState()
   }
 
   const downloadCanvas = () => {
     if (!canvasRef.current) return
 
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "px",
+    const pdf = new jsPDF({
+      orientation: "landscape",
+      unit: "px",
       format: [canvasRef.current.width, canvasRef.current.height],
     })
 
@@ -261,7 +470,8 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
       pdf.addImage(img, "PNG", 0, 0, canvasRef.current!.width, canvasRef.current!.height)
     })
 
-      pdf.save(`${title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`)
+    // Download the PDF
+    pdf.save(`${title.replace(/[^a-z0-9]/gi, "_").toLowerCase()}.pdf`)
   }
 
   const clearCanvas = () => {
@@ -461,24 +671,157 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
   const handleTextSubmit = () => {
     if (!ctx || !textPosition || !textInput.trim()) return
 
-    ctx.font = `${fontSize}px Arial`
-    ctx.fillStyle = color
-    ctx.fillText(textInput, textPosition.x, textPosition.y)
-    
+    const newTextElement: TextElement = {
+      id: Date.now().toString(),
+      text: textInput,
+      x: textPosition.x,
+      y: textPosition.y,
+      fontSize,
+      color,
+      fontFamily
+    }
+
+    setTextElements(prev => [...prev, newTextElement])
+    drawTextElement(newTextElement)
+
+    // Store the text content in the slide
+    setSlides((prevSlides) => {
+      const newSlides = [...prevSlides]
+      newSlides[currentSlide] = {
+        ...newSlides[currentSlide],
+        text: (newSlides[currentSlide].text || "") + textInput + "\n"
+      }
+      return newSlides
+    })
+
     setTextInput("")
     setIsAddingText(false)
     setTextPosition(null)
     saveCurrentState()
   }
 
-  const handleToolChange = (newTool: "pen" | "eraser" | "selection" | "text") => {
+  const drawTextElement = (element: TextElement) => {
+    if (!ctx) return
+
+    ctx.save()
+    ctx.font = `${element.fontSize}px ${element.fontFamily}`
+    ctx.fillStyle = element.color
+    ctx.textAlign = 'left'
+
+    const lines = element.text.split('\n')
+    const lineHeight = element.fontSize * 1.2
+    let y = element.y
+
+    lines.forEach(line => {
+      ctx.fillText(line, element.x, y)
+      y += lineHeight
+    })
+
+    ctx.restore()
+  }
+
+  const handleToolChange = (newTool: "pen" | "eraser" | "selection" | "text" | "shape") => {
     // Clear text input state when switching tools
     if (newTool !== "text") {
       setTextInput("")
       setIsAddingText(false)
       setTextPosition(null)
+      setIsTextToolActive(false)
+    } else {
+      setIsTextToolActive(true)
     }
+
+    // Clear selection when switching tools
+    if (newTool !== "selection") {
+      setSelectionStart(null)
+      setSelectionEnd(null)
+      setIsSelecting(false)
+    }
+
     setTool(newTool)
+  }
+
+  const handleSearch = (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([])
+      setCurrentSearchIndex(-1)
+      return
+    }
+
+    const results = slides
+      .map((slide, index) => {
+        if (slide.text?.toLowerCase().includes(query.toLowerCase())) {
+          return { slideIndex: index, text: slide.text }
+        }
+        return null
+      })
+      .filter((result): result is { slideIndex: number; text: string } => result !== null)
+
+    setSearchResults(results)
+    setCurrentSearchIndex(results.length > 0 ? 0 : -1)
+
+    if (results.length > 0) {
+      // Navigate to the first result
+      setCurrentSlide(results[0].slideIndex)
+      toast({
+        title: "Search Results",
+        description: `Found ${results.length} matches`,
+      })
+    } else {
+      toast({
+        title: "No Results",
+        description: "No matching text found in any slide",
+      })
+    }
+  }
+
+  const navigateToNextResult = () => {
+    if (searchResults.length === 0) return
+
+    const nextIndex = (currentSearchIndex + 1) % searchResults.length
+    setCurrentSearchIndex(nextIndex)
+    setCurrentSlide(searchResults[nextIndex].slideIndex)
+  }
+
+  const navigateToPreviousResult = () => {
+    if (searchResults.length === 0) return
+
+    const prevIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length
+    setCurrentSearchIndex(prevIndex)
+    setCurrentSlide(searchResults[prevIndex].slideIndex)
+  }
+
+  const drawShape = (shape: Shape) => {
+    if (!ctx) return
+
+    ctx.strokeStyle = shape.color
+    ctx.lineWidth = shape.lineWidth
+
+    switch (shape.type) {
+      case "rectangle":
+        ctx.strokeRect(shape.x, shape.y, shape.width, shape.height)
+        break
+      case "circle":
+        const radius = Math.sqrt(shape.width * shape.width + shape.height * shape.height)
+        ctx.beginPath()
+        ctx.arc(shape.x, shape.y, radius, 0, Math.PI * 2)
+        ctx.stroke()
+        break
+      case "line":
+        ctx.beginPath()
+        ctx.moveTo(shape.x, shape.y)
+        ctx.lineTo(shape.x + shape.width, shape.y + shape.height)
+        ctx.stroke()
+        break
+      case "triangle":
+        ctx.beginPath()
+        ctx.moveTo(shape.x, shape.y + shape.height)
+        ctx.lineTo(shape.x + shape.width, shape.y + shape.height)
+        ctx.lineTo(shape.x + shape.width / 2, shape.y)
+        ctx.closePath()
+        ctx.stroke()
+        break
+    }
   }
 
   return (
@@ -490,6 +833,7 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
         isSaving={isSaving}
         showSaveButton={true}
         isCanvasPage={true}
+        onSearch={handleSearch}
       />
 
       <div className="container py-0">
@@ -497,15 +841,13 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
           <div
             className={cn("flex-1 flex flex-col transition-all duration-300", showAiResponse ? "lg:w-2/3" : "w-full")}
           >
-            <div className="bg-white rounded-lg shadow-md p-2 mb-4">
+            <div className="bg-white rounded-lg shadow-md p-2 mb-4 sticky top-0 z-50">
               <div className="flex flex-wrap gap-1.5">
                 {/* Pen Tool */}
                 <Popover open={showPenOptions} onOpenChange={setShowPenOptions}>
                   <PopoverTrigger asChild>
-                    <Button variant={tool === "pen" ? "default" : "outline"} size="sm" className="h-8" onClick={() => handleToolChange("pen")}>
-                      <Pencil className="h-3.5 w-3.5 mr-1.5" />
-                      Pen
-                      <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+                    <Button variant={tool === "pen" ? "default" : "outline"} size="sm" className="h-8 w-8 p-0" onClick={() => handleToolChange("pen")} title="Pen">
+                      <Pencil className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80">
@@ -550,12 +892,11 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
                     <Button
                       variant={tool === "text" ? "default" : "outline"}
                       size="sm"
-                      className="h-8"
+                      className="h-8 w-8 p-0"
                       onClick={() => handleToolChange("text")}
+                      title="Text"
                     >
-                      <Type className="h-3.5 w-3.5 mr-1.5" />
-                      Text
-                      <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+                      <Type className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80">
@@ -600,12 +941,11 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
                     <Button
                       variant={tool === "eraser" ? "default" : "outline"}
                       size="sm"
-                      className="h-8"
+                      className="h-8 w-8 p-0"
                       onClick={() => handleToolChange("eraser")}
+                      title="Eraser"
                     >
-                      <Eraser className="h-3.5 w-3.5 mr-1.5" />
-                      Eraser
-                      <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+                      <Eraser className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80">
@@ -642,26 +982,114 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
                   </PopoverContent>
                 </Popover>
 
+                {/* Shape Tool */}
+                <Popover open={showShapeOptions} onOpenChange={setShowShapeOptions}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={tool === "shape" ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => handleToolChange("shape")}
+                      title="Shape"
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant={shapeType === "rectangle" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setShapeType("rectangle")
+                          setShowShapeOptions(false)
+                        }}
+                        title="Rectangle"
+                      >
+                        <Square className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={shapeType === "circle" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setShapeType("circle")
+                          setShowShapeOptions(false)
+                        }}
+                        title="Circle"
+                      >
+                        <Circle className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={shapeType === "line" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setShapeType("line")
+                          setShowShapeOptions(false)
+                        }}
+                        title="Line"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={shapeType === "triangle" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setShapeType("triangle")
+                          setShowShapeOptions(false)
+                        }}
+                        title="Triangle"
+                      >
+                        <Triangle className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
                 {/* Selection Tool */}
                 <Button
                   variant={tool === "selection" ? "default" : "outline"}
                   size="sm"
-                  className="h-8"
+                  className="h-8 w-8 p-0"
                   onClick={() => handleToolChange("selection")}
+                  title="Selection"
                 >
-                  <Search className="h-3.5 w-3.5 mr-1.5" />
-                  Selection
+                  <Search className="h-4 w-4" />
                 </Button>
+
+                {/* Search Navigation */}
+                {searchResults.length > 0 && (
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={navigateToPreviousResult}
+                      className="h-8 w-8 p-0"
+                      title="Previous Result"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm">
+                      {currentSearchIndex + 1} of {searchResults.length}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={navigateToNextResult}
+                      className="h-8 w-8 p-0"
+                      title="Next Result"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
 
                 {/* Action Buttons */}
                 <div className="flex gap-1.5 ml-auto">
-                  <Button variant="outline" size="sm" className="h-8" onClick={downloadCanvas}>
-                    <Download className="h-3.5 w-3.5 mr-1.5" />
-                    Download PDF
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={downloadCanvas} title="Download PDF">
+                    <Download className="h-4 w-4" />
                   </Button>
-                  <Button variant="outline" size="sm" className="h-8" onClick={clearCanvas}>
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                    Clear
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={clearCanvas} title="Clear Canvas">
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                   <Button
                     size="sm"
@@ -671,8 +1099,9 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
                     )}
                     onClick={searchWithGemini}
                     disabled={!selectionStart || !selectionEnd || isLoading || tool !== "selection"}
+                    title="Search with AI"
                   >
-                    <Search className="h-3.5 w-3.5 mr-1.5" />
+                    <Search className="h-4 w-4 mr-2" />
                     {isLoading ? "Searching..." : "Search with AI"}
                   </Button>
                 </div>
@@ -740,7 +1169,7 @@ export default function CanvasEditor({ noteId, initialNote, userId }: CanvasEdit
               <Button variant="outline" size="sm" onClick={addNewSlide}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add New Slide
-            </Button>
+              </Button>
             </div>
           </div>
 
